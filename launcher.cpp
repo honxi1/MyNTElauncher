@@ -56,6 +56,25 @@ static void AddLogF(const char* fmt, ...) {
     AddLog(buf);
 }
 
+// 判断当前进程是否以管理员(提权)身份运行
+static bool IsRunAsAdmin() {
+    HANDLE hToken = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
+        return false;
+    TOKEN_ELEVATION te;
+    DWORD sz = 0;
+    BOOL ok = GetTokenInformation(hToken, TokenElevation, &te, sizeof(te), &sz);
+    CloseHandle(hToken);
+    return ok && te.TokenIsElevated;
+}
+
+// 以管理员权限重新启动自己（兼容 manifest 被系统忽略的情况）
+static void RelaunchAsAdmin() {
+    char path[MAX_PATH];
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    ShellExecuteA(NULL, "runas", path, "", NULL, SW_SHOWNORMAL);
+}
+
 // 提升到 SeDebugPrivilege（管理员运行时可用）
 static void EnableDebugPrivilege() {
     HANDLE hToken;
@@ -130,7 +149,11 @@ static void DoInjection() {
 
     // 2. 提取内嵌 MyInject.dll
     if (!ExtractEmbeddedDll()) {
-        AddLogF("[错误] 提取MyInject.dll失败 错误=%lu", GetLastError());
+        DWORD err = GetLastError();
+        AddLogF("[错误] 提取MyInject.dll失败 错误=%lu 管理员=%s",
+                err, IsRunAsAdmin() ? "是" : "否");
+        if (err == ERROR_ACCESS_DENIED)
+            AddLog("[提示] 访问被拒绝：请右键“以管理员身份运行”，或将本工具加入杀毒软件白名单后重试");
         return;
     }
     AddLog("[提取] MyInject.dll 已释放到临时目录");
@@ -226,6 +249,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow) {
+    // 确保以管理员运行：manifest 被忽略时自动弹窗提示并自提权
+    if (!IsRunAsAdmin()) {
+        MessageBoxA(NULL,
+            "本启动器需要管理员权限才能注入游戏。\n请右键选择“以管理员身份运行”，或在弹出的权限确认窗口中点击“是”。",
+            "异环 MOD 启动器", MB_ICONWARNING | MB_OK);
+        RelaunchAsAdmin();
+        return 0;
+    }
+
     // 窗口类
     WNDCLASSEXW wc = { sizeof(wc) };
     wc.lpfnWndProc = WndProc;
