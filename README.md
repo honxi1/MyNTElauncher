@@ -48,7 +48,7 @@ build.bat
 ├── launcher.cpp       # 启动器（提权/释放载体/装钩子/轮询）
 ├── MyInject.cpp       # 注入载体 DLL（Shared段 + HookProc）
 ├── launcher.rc        # 资源脚本（内嵌 MyInject.dll + 管理员 manifest）
-├── launcher.manifest  # requireAdministrator
+├── launcher.manifest  # asInvoker（配合右键管理员运行，避免被反作弊标记）
 └── build.bat          # 一键编译
 ```
 

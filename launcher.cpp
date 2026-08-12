@@ -33,7 +33,7 @@ static int g_countdown   = 5;         // 注入完成后的倒计时(秒)
 // 配置（硬编码，无需 ini）
 static std::string g_processName = "HTGame.exe"; // 目标游戏进程名
 static std::string g_asiList;                    // ASI/DLL 列表（|分隔，绝对路径）
-static DWORD g_injectDelay = 1000;               // 注入延迟(ms)
+static DWORD g_injectDelay = 1000;               // 注入延迟(ms)，与小飞一致(1秒)
 
 // ============ 工具函数 ============
 static void AddLog(const char* text) {
@@ -66,13 +66,6 @@ static bool IsRunAsAdmin() {
     BOOL ok = GetTokenInformation(hToken, TokenElevation, &te, sizeof(te), &sz);
     CloseHandle(hToken);
     return ok && te.TokenIsElevated;
-}
-
-// 以管理员权限重新启动自己（兼容 manifest 被系统忽略的情况）
-static void RelaunchAsAdmin() {
-    char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    ShellExecuteA(NULL, "runas", path, "", NULL, SW_SHOWNORMAL);
 }
 
 // 提升到 SeDebugPrivilege（管理员运行时可用）
@@ -271,14 +264,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow) {
-    // 确保以管理员运行：manifest 被忽略时自动弹窗提示并自提权
-    if (!IsRunAsAdmin()) {
-        MessageBoxA(NULL,
-            "本启动器需要管理员权限才能注入游戏。\n请右键选择“以管理员身份运行”，或在弹出的权限确认窗口中点击“是”。",
-            "异环 MOD 启动器", MB_ICONWARNING | MB_OK);
-        RelaunchAsAdmin();
-        return 0;
-    }
+    // 不再强制管理员权限（对齐小飞 asInvoker，避免被ACE标记）；需要时用户可右键管理员运行
 
     // 窗口类
     WNDCLASSEXW wc = { sizeof(wc) };
