@@ -10,6 +10,18 @@
 4. 启动器自动安装钩子，窗口提示后手动启动游戏
 5. 游戏创建窗口后自动注入补丁，约 5 秒后启动器自动关闭
 
+## MOD 安装路径
+
+把 `.pak` 放到游戏目录的 `~mods` 文件夹：
+
+```
+<游戏目录>\Client\WindowsNoEditor\HT\Content\Paks\~mods
+```
+
+- 游戏默认目录名是 `Neverness To Everness`
+- `~mods` 文件夹没有就自己建（注意带 `~` 波浪号）
+- 示例：`D:\Neverness To Everness\Client\WindowsNoEditor\HT\Content\Paks\~mods\你的mod.pak`
+
 ## 工作原理
 
 ```
