@@ -4,6 +4,20 @@
 // 由 HookProc 创建线程加载 ASI/插件，避免时序问题。
 #include <windows.h>
 #include <string.h>
+#include <stdio.h>
+
+// 记录 ASI 加载结果到 %TEMP%\MyInject_load.log（排查"注入完成但mod无效"）
+static void LogLoad(const char* path, HMODULE m) {
+    char tmp[MAX_PATH], p[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, tmp)) return;
+    wsprintfA(p, "%sMyInject_load.log", tmp);
+    FILE* f = fopen(p, "a");
+    if (f) {
+        fprintf(f, "[%lu] %s -> 0x%p err=%lu\n",
+                GetTickCount(), path, m, m ? 0 : GetLastError());
+        fclose(f);
+    }
+}
 
 // ============ Shared 段（跨进程共享状态）============
 //   0x6000  g_injectDone   DWORD  注入完成标志
@@ -55,7 +69,8 @@ static DWORD WINAPI LoadPluginsThread(LPVOID) {
         char* end = tok + strlen(tok) - 1;
         while (end >= tok && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) *end-- = 0;
         if (*tok) {
-            LoadLibraryA(tok);
+            HMODULE m = LoadLibraryA(tok);
+            LogLoad(tok, m);
         }
         tok = strtok_s(NULL, "|", &ctx);
     }
