@@ -1,0 +1,15 @@
+# 编译产物
+*.exe
+*.dll
+*.o
+*.a
+*.obj
+
+# 外部二进制补丁（放 Release 附件，不入库）
+*.asi
+*.sig
+
+# 临时文件
+*.log
+Thumbs.db
+.DS_Store

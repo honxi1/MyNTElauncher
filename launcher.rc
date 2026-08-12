@@ -1,0 +1,5 @@
+// launcher.rc - 嵌入 MyInject.dll 到启动器资源 (RT_RCDATA id=101)
+101 RCDATA "MyInject.dll"
+
+// 请求以管理员身份运行（注入需要 SeDebugPrivilege / 访问游戏进程）
+1 24 "launcher.manifest"
