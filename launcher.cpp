@@ -88,34 +88,63 @@ static void EnableDebugPrivilege() {
     CloseHandle(hToken);
 }
 
-// 从自身资源提取内嵌DLL到临时目录，返回DLL路径（用全局s_dllPath保存）
-static bool ExtractEmbeddedDll() {
+// 从自身资源提取内嵌DLL。依次尝试多个可写目录，成功则写入 outPath。
+// 失败时 outErr 为最后的错误码，并输出每步诊断日志。
+static bool ExtractEmbeddedDll(char* outPath, DWORD* outErr) {
+    *outErr = 0;
     HRSRC hr = FindResourceA(NULL, MAKEINTRESOURCE(101), RT_RCDATA);
-    if (!hr) return false;
-    HGLOBAL hg = LoadResource(NULL, hr);
-    if (!hg) return false;
-    void* data = LockResource(hg);
-    DWORD size = SizeofResource(NULL, hr);
-    if (!data || size == 0) return false;
-
-    char tmpPath[MAX_PATH];
-    GetTempPathA(MAX_PATH, tmpPath);
-
-    // 构造临时文件名: %TEMP%\MyInject_<pid>.dll（注入载体，保持原样）
-    static char s_dllPath[MAX_PATH];
-    wsprintfA(s_dllPath, "%sMyInject_%lu.dll", tmpPath, GetCurrentProcessId());
-
-    // 写文件
-    HANDLE hf = CreateFileA(s_dllPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hf == INVALID_HANDLE_VALUE) return false;
-    DWORD written = 0;
-    BOOL ok = WriteFile(hf, data, size, &written, NULL);
-    CloseHandle(hf);
-    if (!ok || written != size) {
-        DeleteFileA(s_dllPath);
+    if (!hr) {
+        *outErr = GetLastError();
+        AddLogF("[诊断] FindResource(101)失败 err=%lu", *outErr);
         return false;
     }
-    return true;
+    HGLOBAL hg = LoadResource(NULL, hr);
+    if (!hg) {
+        *outErr = GetLastError();
+        AddLogF("[诊断] LoadResource失败 err=%lu", *outErr);
+        return false;
+    }
+    void* data = LockResource(hg);
+    DWORD size = SizeofResource(NULL, hr);
+    if (!data || size == 0) {
+        *outErr = GetLastError();
+        AddLogF("[诊断] LockResource失败 err=%lu size=%lu", *outErr, size);
+        return false;
+    }
+
+    // 候选目录：%TEMP% → exe同目录 → Windows\Temp
+    char tmpPath[MAX_PATH], exeDir[MAX_PATH], winTmp[MAX_PATH];
+    GetTempPathA(MAX_PATH, tmpPath);
+    GetModuleFileNameA(NULL, exeDir, MAX_PATH);
+    char* p = strrchr(exeDir, '\\');
+    if (p) *(p + 1) = 0;
+    GetWindowsDirectoryA(winTmp, MAX_PATH);
+    lstrcatA(winTmp, "\\Temp");
+
+    const char* dirs[3] = { tmpPath, exeDir, winTmp };
+    DWORD lastErr = ERROR_ACCESS_DENIED;
+    for (int i = 0; i < 3; i++) {
+        // 文件名带 pid+时钟 保证唯一，避免与被杀软扫描锁定的旧文件冲突
+        wsprintfA(outPath, "%sMyInject_%lu_%lu.dll", dirs[i], GetCurrentProcessId(), GetTickCount());
+        HANDLE hf = CreateFileA(outPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hf == INVALID_HANDLE_VALUE) {
+            lastErr = GetLastError();
+            AddLogF("[诊断] 写入目录%d失败 err=%lu path=%s", i + 1, lastErr, outPath);
+            continue;
+        }
+        DWORD written = 0;
+        BOOL ok = WriteFile(hf, data, size, &written, NULL);
+        CloseHandle(hf);
+        if (ok && written == size) {
+            AddLogF("[提取] 已写入 %s", outPath);
+            return true;
+        }
+        lastErr = GetLastError();
+        AddLogF("[诊断] 写入目录%d不完整 err=%lu", i + 1, lastErr);
+        DeleteFileA(outPath);
+    }
+    *outErr = lastErr;
+    return false;
 }
 
 // 获取当前exe所在目录（带结尾反斜杠）
@@ -147,25 +176,18 @@ static void DoInjection() {
     AddLogF("[配置] 进程名=%s 延迟=%lu", g_processName.c_str(), g_injectDelay);
     AddLogF("[配置] 插件列表=%s", g_asiList.c_str());
 
-    // 2. 提取内嵌 MyInject.dll
-    if (!ExtractEmbeddedDll()) {
-        DWORD err = GetLastError();
+    // 2. 提取内嵌 MyInject.dll（多目录回退，详见诊断日志）
+    static char s_dllPath[MAX_PATH];
+    DWORD extractErr = 0;
+    if (!ExtractEmbeddedDll(s_dllPath, &extractErr)) {
         AddLogF("[错误] 提取MyInject.dll失败 错误=%lu 管理员=%s",
-                err, IsRunAsAdmin() ? "是" : "否");
-        if (err == ERROR_ACCESS_DENIED)
+                extractErr, IsRunAsAdmin() ? "是" : "否");
+        if (extractErr == ERROR_ACCESS_DENIED)
             AddLog("[提示] 访问被拒绝：请右键“以管理员身份运行”，或将本工具加入杀毒软件白名单后重试");
         return;
     }
-    AddLog("[提取] MyInject.dll 已释放到临时目录");
 
     // 3. 加载载体DLL
-    static char s_dllPath[MAX_PATH];
-    {
-        char tmpPath[MAX_PATH];
-        GetTempPathA(MAX_PATH, tmpPath);
-        wsprintfA(s_dllPath, "%sMyInject_%lu.dll", tmpPath, GetCurrentProcessId());
-    }
-
     g_hMyInject = LoadLibraryA(s_dllPath);
     if (!g_hMyInject) {
         AddLogF("[错误] LoadLibraryA失败 错误=%lu", GetLastError());
