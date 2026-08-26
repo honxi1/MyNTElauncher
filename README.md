@@ -6,9 +6,9 @@
 
 1. 从 [Releases](../../releases) 下载，或自行编译（见下）
 2. 将 `UniversalSigBypasser.asi` 放在启动器同目录
-3. **右键管理员运行** `MyLauncher（右键管理启动）.exe`
+3. **右键管理员运行** `MyLauncher.exe`
 4. 启动器自动安装钩子，窗口提示后手动启动游戏
-5. 游戏创建窗口后自动注入补丁，约 5 秒后启动器自动关闭
+5. 游戏创建窗口后自动注入补丁，提示注入完成后手动关闭窗口
 
 ## MOD 安装路径
 
@@ -25,7 +25,7 @@
 ## 工作原理
 
 ```
-MyLauncher（右键管理启动）.exe（管理员）
+MyLauncher.exe（管理员）
   ├─ 从自身资源释放注入载体 MyInject.dll 到 %TEMP%
   ├─ SetWindowsHookExW(WH_CALLWNDPROC, HookProc) 全局钩子
   └─ 游戏进程创建窗口时，HookProc 触发
