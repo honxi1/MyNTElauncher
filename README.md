@@ -52,6 +52,10 @@ build.bat
 └── build.bat          # 一键编译
 ```
 
+## 致谢
+
+感谢朋友 绝小非 在注入机制方面提供的思路与帮助。
+
 ## 声明
 
 - `UniversalSigBypasser.asi` 补丁来自 [rm-NoobInCoding/UniversalSigBypasser](https://github.com/rm-NoobInCoding/UniversalSigBypasser)，作者 rm-NoobInCoding，许可证 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)（署名-非商业性使用）
