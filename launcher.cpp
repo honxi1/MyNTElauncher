@@ -8,7 +8,9 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string>
 
 #pragma comment(lib, "comdlg32.lib")
@@ -25,15 +27,15 @@ static FARPROC g_fnHookProc      = NULL;
 
 static HWND g_hwndMain   = NULL;      // 主窗口
 static HWND g_hwndLog    = NULL;      // 日志框
+static HWND g_hwndDelay  = NULL;      // 延时输入框
 static bool g_bInjected  = false;     // 是否已注入完成
 static bool g_bInjectionStarted = false; // 防止重复注入
 static UINT_PTR g_timer  = 0;
-static int g_countdown   = 5;         // 注入完成后的倒计时(秒)
 
 // 配置（硬编码，无需 ini）
 static std::string g_processName = "HTGame.exe"; // 目标游戏进程名
 static std::string g_asiList;                    // ASI/DLL 列表（|分隔，绝对路径）
-static DWORD g_injectDelay = 1000;               // 注入延迟(ms)，与小飞一致(1秒)
+static DWORD g_injectDelay = 1000;               // 注入延迟(ms)，默认1秒（与小飞一致）
 
 // ============ 工具函数 ============
 static void AddLog(const char* text) {
@@ -155,18 +157,44 @@ static void LoadConfig() {
     g_asiList = GetExeDir() + "UniversalSigBypasser.asi";
 }
 
+// 配置文件路径：exe 同目录 MyNTElauncher.ini
+static std::string GetIniPath() {
+    return GetExeDir() + "MyNTElauncher.ini";
+}
+
+// 从配置文件读取上次保存的延时(ms)，失败返回默认1000
+static DWORD LoadDelayFromIni() {
+    return GetPrivateProfileIntA("Settings", "Delay", 1000, GetIniPath().c_str());
+}
+
+// 保存延时到配置文件（exe 同目录，无需管理员权限）
+static void SaveDelayToIni(DWORD ms) {
+    char buf[32];
+    wsprintfA(buf, "%lu", ms);
+    WritePrivateProfileStringA("Settings", "Delay", buf, GetIniPath().c_str());
+}
+
 // 注入主流程
 static void DoInjection() {
     if (g_bInjectionStarted) return;
     g_bInjectionStarted = true;
-    AddLog("[启动] 注入流程开始");
+
+    // 0. 读取输入框的延时（毫秒）
+    if (g_hwndDelay) {
+        char buf[32] = {0};
+        GetWindowTextA(g_hwndDelay, buf, sizeof(buf));
+        long ms = atol(buf);
+        if (ms < 0 || ms > 60000) ms = 1000;
+        g_injectDelay = (DWORD)ms;
+        SaveDelayToIni(g_injectDelay);
+    }
 
     EnableDebugPrivilege();
     AddLog("[提权] SeDebugPrivilege 已尝试");
 
     // 1. 初始化配置（硬编码，无需 ini）
     LoadConfig();
-    AddLogF("[配置] 进程名=%s 延迟=%lu", g_processName.c_str(), g_injectDelay);
+    AddLogF("[配置] 进程名=%s 延迟=%lums", g_processName.c_str(), g_injectDelay);
     AddLogF("[配置] 插件列表=%s", g_asiList.c_str());
 
     // 2. 提取内嵌 MyInject.dll（多目录回退，详见诊断日志）
@@ -214,7 +242,6 @@ static void DoInjection() {
         return;
     }
     AddLog("[注入] 全局Hook已安装 (WH_CALLWNDPROC)");
-    AddLog("[提示] 请自行启动游戏，游戏创建窗口后会自动注入");
 
     // 7. 轮询注入状态（timer 挂在主窗口上）
     g_bInjected = false;
@@ -227,32 +254,56 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE:
     {
+        // 顶部：延时输入框（毫秒），默认 1000
+        CreateWindowExA(0, "STATIC", "注入延时(ms):",
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            10, 12, 90, 20, hwnd, NULL, GetModuleHandleA(NULL), NULL);
+        // 初始值从配置文件读取上次保存的值（未保存过则默认1000）
+        char delayBuf[32];
+        wsprintfA(delayBuf, "%lu", LoadDelayFromIni());
+        g_hwndDelay = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", delayBuf,
+            WS_CHILD | WS_VISIBLE | ES_LEFT | ES_AUTOHSCROLL,
+            105, 10, 60, 22, hwnd, NULL, GetModuleHandleA(NULL), NULL);
+
+        // 保存延时按钮（修改延时后点此按钮重新挂载，下次打开自动生效）
+        CreateWindowExA(0, "BUTTON", "保存延时",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            175, 9, 80, 24, hwnd, (HMENU)1, GetModuleHandleA(NULL), NULL);
+
         // 多行日志框（只读）
         g_hwndLog = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
             WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL |
             WS_VSCROLL | ES_LEFT,
-            10, 10, 380, 100, hwnd, NULL, GetModuleHandleA(NULL), NULL);
+            10, 40, 380, 110, hwnd, NULL, GetModuleHandleA(NULL), NULL);
         return 0;
     }
+    case WM_COMMAND:
+        if (LOWORD(wp) == 1) {
+            // 保存延时到 ini
+            if (g_hwndDelay) {
+                char buf[32] = {0};
+                GetWindowTextA(g_hwndDelay, buf, sizeof(buf));
+                long ms = atol(buf);
+                if (ms < 0 || ms > 60000) ms = 1000;
+                g_injectDelay = (DWORD)ms;
+                SaveDelayToIni(g_injectDelay);
+            }
+            // 重置状态，重新挂载
+            g_bInjectionStarted = false;
+            g_bInjected = false;
+            if (g_timer) { KillTimer(hwnd, g_timer); g_timer = 0; }
+            DoInjection();
+        }
+        return 0;
     case WM_TIMER:
         if (g_bInjected) {
-            // 注入完成，倒计时自动关闭
-            if (g_countdown <= 1) {
-                KillTimer(hwnd, 1);
-                DestroyWindow(hwnd);   // 触发 WM_DESTROY 退出
-            } else {
-                g_countdown--;
-                AddLogF("[倒计时] %d 秒后自动关闭...", g_countdown);
-            }
-            return 0;
+            return 0;  // 已经注入完成，不再自动关闭
         }
         if (g_fnIsInjectionDone) {
             if (((BOOL(*)())g_fnIsInjectionDone)()) {
                 KillTimer(hwnd, 1);
-                AddLog("[完成] 注入完成，5秒后自动关闭");
+                AddLog("[完成] 注入完成，可手动关闭窗口");
                 g_bInjected = true;
-                g_countdown = 5;
-                g_timer = SetTimer(hwnd, 1, 1000, NULL);   // 改为1秒倒计时
             }
         }
         return 0;
@@ -276,14 +327,14 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nCmdShow) {
 
     HWND hwnd = CreateWindowExW(0, L"MyLauncherWnd", L"异环 MOD 启动器",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 420, 160, NULL, NULL, hInst, NULL);
+        CW_USEDEFAULT, CW_USEDEFAULT, 420, 190, NULL, NULL, hInst, NULL);
     if (!hwnd) return 0;
     g_hwndMain = hwnd;
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
-    // 窗口显示后自动开始注入
-    DoInjection();
+    // 打开即自动注入，用上次保存的延时
+    PostMessageA(hwnd, WM_COMMAND, 1, 0);
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {

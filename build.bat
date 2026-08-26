@@ -25,9 +25,9 @@ if errorlevel 1 (
 )
 
 echo [1/4] compiling MyInject.dll ...
-g++ -c -O2 -std=c++17 -o MyInject.o MyInject.cpp
+g++ -c -O2 -std=c++17 -fno-asynchronous-unwind-tables -o MyInject.o MyInject.cpp
 if errorlevel 1 goto :err
-g++ -shared -O2 -o MyInject.dll MyInject.o -static
+g++ -shared -O2 -nostartfiles -Wl,--gc-sections -o MyInject.dll MyInject.o -static -lkernel32 -luser32
 if errorlevel 1 goto :err
 
 echo [2/4] building resources (embed MyInject.dll) ...
